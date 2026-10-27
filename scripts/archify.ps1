@@ -1,3 +1,1 @@
-﻿[CmdletBinding()]
-param()
-& "$PSScriptRoot\auto_push\archify.ps1" @args
+﻿& "$PSScriptRoot\auto_push\archify.ps1" @args
