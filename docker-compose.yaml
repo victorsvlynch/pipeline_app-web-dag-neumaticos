@@ -1,0 +1,17 @@
+services:
+  streamlit-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pipeline-dag-neumaticos-streamlit:latest
+    container_name: dag-neumaticos-etl-streamlit
+    ports:
+      - "8502:8502"
+    volumes:
+      - ./app.py:/app/app.py
+      - ./scripts:/app/scripts
+      - ./Archivos:/app/Archivos
+      - ./.streamlit:/app/.streamlit
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: always
