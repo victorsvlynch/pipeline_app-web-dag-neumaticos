@@ -135,13 +135,16 @@ try {
 
     Write-Host "Haciendo Commit y Push a GitHub..." -ForegroundColor Yellow
     git commit -m "$commitMsg"
-    git push origin main 2>$null
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $pushRes = & git push origin main 2>&1
     if ($LASTEXITCODE -ne 0) {
-        git push origin master 2>$null
+        $pushRes = & git push origin master 2>&1
         if ($LASTEXITCODE -ne 0) {
-            git push
+            $pushRes = & git push 2>&1
         }
     }
+    $ErrorActionPreference = $prevEAP
 
     Write-Host ""
     Write-Host "============================================================" -ForegroundColor Green
