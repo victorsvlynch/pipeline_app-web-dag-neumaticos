@@ -1,0 +1,50 @@
+sequenceDiagram
+    autonumber
+    actor Operador as Operador / Usuario
+    participant UI as Streamlit Web UI (:8502)
+    participant ETL as Motor ETL (etl_maestro.py)
+    participant Maestro as Maestro k.xlsx (104 Hojas)
+    participant Auditoria as Motor Auditoria (Opcion B)
+    participant Plantillas as 7 Plantillas Excel
+    participant Reporte as Reporte Auditoria Excel
+    participant Archify as Archify (archives/*.zip)
+    participant Git as GitHub Actions (release.yml)
+
+    Operador->>UI: Clic '🚀 Ejecutar Pipeline ETL'
+    UI->>ETL: Invoca ejecutar_pipeline(rango='A2:A35')
+    
+    rect rgb(240, 248, 255)
+        note over ETL,Maestro: Fase 1: Extraccion Estricta y Filtrado
+        ETL->>Maestro: Lee pestaña 'Resumen!A2:A35' (34 Unidades Activas)
+        ETL->>Maestro: Lee catalogo de Conductores ('LISTA' y 'CONDUCT.')
+        ETL->>Maestro: Extrae Primer Recuadro por Hoja de Unidad (P1..P22, RT, RS)
+        ETL->>Maestro: Extrae Tanques, Mochila, Aro, Condicion y PSI real
+    end
+
+    rect rgb(255, 250, 240)
+        note over ETL,Plantillas: Fase 2: Generacion de 7 Plantillas Oficiales
+        ETL->>Plantillas: Actualiza Vehiculos (68 unidades con 11 columnas)
+        ETL->>Plantillas: Actualiza Conductores y Asignaciones (30 y 34 reg.)
+        ETL->>Plantillas: Actualiza Neumaticos Unicos (781 reg. Opción B)
+        ETL->>Plantillas: Actualiza Movimientos y Posiciones (804 montajes)
+        ETL->>Plantillas: Actualiza Comparativa Combustible y Grifos
+    end
+
+    rect rgb(245, 255, 250)
+        note over ETL,Reporte: Fase 3: Conciliacion y Auditoria
+        ETL->>Auditoria: Transfiere diccionarios de extraccion
+        Auditoria->>Reporte: Genera Reporte_Auditoria_Conciliacion_Neumaticos_DAG.xlsx
+        Auditoria-->>UI: Retorna resumen de ejecucion y KPIs
+    end
+
+    UI-->>Operador: Renderiza 6 tarjetas KPIs, Graficos Plotly y Tablas
+    
+    opt Empaquetado y Distribucion
+        Operador->>Archify: Ejecuta archify.bat / archify.ps1
+        Archify->>Archify: Empaqueta ZIP con manifest.json en archives/
+    end
+
+    opt Versionado y Publicacion
+        Operador->>Git: Ejecuta auto_push.bat (Gemini Conventional Commit)
+        Git->>Git: Push origin main -> Dispara SemVer Release
+    end

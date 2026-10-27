@@ -16,6 +16,12 @@ ENV/
 ~$*.xlsx
 ~$*.xls
 
+# Archify & Archives
+archives/*.zip
+
+# API Keys
+scripts/auto_push/api_keys.txt
+
 # IDE and OS metadata
 .vscode/
 .idea/

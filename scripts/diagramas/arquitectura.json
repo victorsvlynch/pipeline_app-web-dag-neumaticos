@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Arquitectura de Ejecucion - Pipeline ETL & Dashboard Streamlit (DAG Neumaticos)",
+    "output": "arquitectura.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    { "id": "client_browser", "type": "frontend", "label": "Navegador Web", "sublabel": "Streamlit UI :8502", "pos": [60, 150], "size": [150, 60] },
+    { "id": "local_batch_runners", "type": "frontend", "label": "Lanzadores Batch", "sublabel": "iniciar / ejecutar .bat", "pos": [60, 300], "size": [150, 60] },
+    { "id": "git_autopush", "type": "frontend", "label": "Auto-Push & SemVer", "sublabel": "scripts/auto_push", "pos": [60, 450], "size": [150, 60] },
+    { "id": "streamlit_server", "type": "backend", "label": "Servidor Streamlit", "sublabel": "Python 3.11 / Uvicorn", "pos": [370, 150], "size": [160, 60] },
+    { "id": "etl_engine", "type": "backend", "label": "Motor ETL Maestro", "sublabel": "etl_maestro.py (8 Etapas)", "pos": [680, 90], "size": [160, 60] },
+    { "id": "auditoria_engine", "type": "backend", "label": "Motor de Auditoria", "sublabel": "generar_reporte (Opcion B)", "pos": [680, 240], "size": [160, 60] },
+    { "id": "archify_tool", "type": "backend", "label": "Archify Packager", "sublabel": "archify.ps1 (.NET ZIP)", "pos": [370, 350], "size": [160, 60] },
+    { "id": "maestro_excel", "type": "database", "label": "Archivo Maestro", "sublabel": "k.xlsx (104 Hojas)", "pos": [990, 90], "size": [160, 60] },
+    { "id": "plantillas_excel", "type": "database", "label": "7 Plantillas Oficiales", "sublabel": "Archivos/Plantillas/*.xlsx", "pos": [990, 240], "size": [160, 60] },
+    { "id": "reporte_auditoria_file", "type": "database", "label": "Reporte Auditoria", "sublabel": "Conciliacion 4 Hojas", "pos": [990, 380], "size": [160, 60] },
+    { "id": "archives_storage", "type": "database", "label": "Deposito Archives", "sublabel": "archives/*.zip + Manifest", "pos": [680, 380], "size": [160, 60] },
+    { "id": "github_repo", "type": "external", "label": "GitHub Repository", "sublabel": "victorsvlynch/pipeline...", "pos": [370, 520], "size": [160, 60] },
+    { "id": "github_actions", "type": "cloud", "label": "GitHub Actions", "sublabel": "release.yml (SemVer Tag)", "pos": [680, 520], "size": [160, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Zona de Operador y Cliente (Local Workstation)", "wraps": ["client_browser", "local_batch_runners", "git_autopush"] },
+    { "kind": "security-group", "label": "Zona de Aplicacion y Contenedor (Docker / Streamlit)", "wraps": ["streamlit_server", "etl_engine", "auditoria_engine", "archify_tool"] },
+    { "kind": "region", "label": "Zona de Datos y Repositorio de Plantillas Excel", "wraps": ["maestro_excel", "plantillas_excel", "reporte_auditoria_file", "archives_storage"] },
+    { "kind": "region", "label": "Zona Externa GitHub & CI/CD", "wraps": ["github_repo", "github_actions"] }
+  ],
+  "connections": [
+    { "id": "browser-to-streamlit", "from": "client_browser", "to": "streamlit_server", "label": "HTTP :8502 (Web UI)", "variant": "emphasis" },
+    { "id": "batch-to-streamlit", "from": "local_batch_runners", "to": "streamlit_server", "label": "iniciar_streamlit.bat" },
+    { "id": "batch-to-etl", "from": "local_batch_runners", "to": "etl_engine", "label": "ejecutar_etl_local.bat", "fromSide": "right", "toSide": "left" },
+    { "id": "streamlit-to-etl", "from": "streamlit_server", "to": "etl_engine", "label": "Dispara Pipeline ETL", "variant": "emphasis" },
+    { "id": "etl-to-maestro", "from": "etl_engine", "to": "maestro_excel", "label": "Lee k.xlsx (Resumen!A2:A35)", "variant": "emphasis" },
+    { "id": "etl-to-plantillas", "from": "etl_engine", "to": "plantillas_excel", "label": "Genera 7 Plantillas Excel", "variant": "emphasis" },
+    { "id": "etl-to-auditoria", "from": "etl_engine", "to": "auditoria_engine", "label": "Pasa Diccionarios Limpios", "fromSide": "bottom", "toSide": "top" },
+    { "id": "auditoria-to-file", "from": "auditoria_engine", "to": "reporte_auditoria_file", "label": "Genera Reporte_Auditoria.xlsx", "variant": "emphasis" },
+    { "id": "archify-to-archives", "from": "archify_tool", "to": "archives_storage", "label": "Genera ZIPs con Manifest", "variant": "emphasis" },
+    { "id": "plantillas-to-archify", "from": "plantillas_excel", "to": "archify_tool", "label": "Respalda Plantillas", "fromSide": "bottom", "toSide": "right" },
+    { "id": "autopush-to-repo", "from": "git_autopush", "to": "github_repo", "label": "git push origin main", "variant": "emphasis" },
+    { "id": "repo-to-actions", "from": "github_repo", "to": "github_actions", "label": "Webhook Push Event", "variant": "emphasis" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Streamlit Web Dashboard (:8502)",
+      "items": [
+        "Tecnologia: Python 3.11 + Streamlit 1.66 con Uvicorn de alto rendimiento.",
+        "6 Pestanas Interactivas: Flota (68 vehiculos con tanques), Conductores (30 validados), Neumaticos (781 unicos con condicion y PSI), Esquema de Montaje por unidad (P1..P22), Combustible y Descargas.",
+        "Mecanismo de conciliacion matematica desplegable: 816 cupos teoricos vs 804 montajes fisicos vs 781 activos unicos.",
+        "Generador de paquete consolidado ZIP con boton de descarga directa."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Motor ETL Maestro (etl_maestro.py)",
+      "items": [
+        "Filtro estricto por la pestana 'Resumen' (rango configurable, defecto A2:A35).",
+        "Aislamiento de primer recuadro operativo para prevenir mezcla de datos historicos.",
+        "Extraccion de 11 columnas tecnicas por vehiculo (tanques laterales y mochilas desde hoja CONDUCT.).",
+        "Deteccion de tipo de aro real (columna 19), PSI medido (columna 16) y condicion (columna 5).",
+        "Tiempo de ejecucion: ~1.8 segundos para la totalidad de la flota activa."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Reglas de Conciliacion Opción B",
+      "items": [
+        "Resolucion de llaves primarias: Plantilla_Registro_Masivo_Neumaticos_DAG.xlsx conserva los activos unicos.",
+        "Trazabilidad fisica de montajes: Plantilla_Asignacion_Movimiento_Neumaticos_DAG.xlsx registra los 804 montajes fisicos.",
+        "Reporte de Auditoria estructurado en 4 hojas detalladas: Justificacion Opcion B, 12 Faltantes, 24 Duplicados y Estado de las 34 Unidades."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Herramientas Auto-Push & Archify",
+      "items": [
+        "Auto-Push (PowerShell / Batch / Python): analiza el git diff y genera commits convencionales con IA (Gemini).",
+        "GitHub Actions (release.yml): detecta prefijos semanticos (feat/fix/chore) y publica Releases SemVer automaticos.",
+        "Archify (archify.ps1): empaquetador ZIP de alta velocidad con manifiestos JSON estructurados para respaldos de plantillas y snapshots del codigo."
+      ]
+    }
+  ]
+}

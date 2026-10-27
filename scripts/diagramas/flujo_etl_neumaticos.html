@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diagrama de Flujo — Pipeline ETL DAG Neumáticos</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --primary: #3b82f6;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --purple: #8b5cf6;
+    }
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --primary: #2563eb;
+      --success: #059669;
+      --warning: #d97706;
+      --purple: #7c3aed;
+    }
+    body {
+      margin: 0;
+      padding: 2rem;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      transition: background 0.3s, color 0.3s;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .badge {
+      background: var(--primary);
+      color: white;
+      font-size: 0.75rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+      font-weight: 600;
+    }
+    .theme-toggle {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem 1rem;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    .card-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-top: 0;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .card-title.blue { color: var(--primary); }
+    .card-title.green { color: var(--success); }
+    .card-title.amber { color: var(--warning); }
+    .card-title.purple { color: var(--purple); }
+    .step-list {
+      margin: 0;
+      padding-left: 1.2rem;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .step-list li strong {
+      color: var(--text);
+    }
+    .diagram-container {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h1 class="title">
+        🚛 Pipeline ETL DAG Neumáticos
+        <span class="badge">Flujo Operativo</span>
+      </h1>
+      <p style="margin: 0.3rem 0 0 0; color: var(--text-muted); font-size: 0.9rem;">
+        Transportes Díaz Acarreos Generales S.A.C. — Arquitectura de Extracción, Conciliación y Carga Masiva
+      </p>
+    </div>
+    <button class="theme-toggle" onclick="toggleTheme()">
+      <span id="theme-icon">☀️</span> Cambiar Tema
+    </button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 class="card-title blue">📑 1. Extracción Estricta (Resumen)</h3>
+      <ul class="step-list">
+        <li>Lectura de pestaña <strong>Resumen!A2:A35</strong> (34 unidades activas).</li>
+        <li>Identificación de placa de tractocamión y cisterna asociada.</li>
+        <li>Aislamiento del <strong>primer recuadro operativo</strong> para evitar arrastre de históricos.</li>
+        <li>Lectura de conductores validados en hojas <code>LISTA</code> y <code>CONDUCT.</code>.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title green">🚛 2. Vehículos y Especificaciones</h3>
+      <ul class="step-list">
+        <li><strong>68 vehículos extraídos:</strong> 34 Tractos + 34 Cisternas.</li>
+        <li><strong>11 columnas completas:</strong> Placa, Tipo, Marca, Modelo, Tipo de Aro (Europeo/Americano), Estado, Km, Carrocería.</li>
+        <li><strong>Tanques de combustible:</strong> Tanque Izq (120/150 gal), Tanque Der (120/150 gal) y Mochila Auxiliar (50 gal si aplica).</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title amber">🛞 3. Conciliación Opción B</h3>
+      <ul class="step-list">
+        <li><strong>816 cupos teóricos</strong> (34 unidades x 24 posiciones).</li>
+        <li><strong>804 montajes físicos reales</strong> (12 posiciones vacías/sin código).</li>
+        <li><strong>781 neumáticos únicos:</strong> Catálogo maestro consolidado para garantizar la llave primaria (PK).</li>
+        <li>Extracción de <strong>Condición real</strong> (Nuevo, Reencauchado, Dibujado) y <strong>PSI</strong> medido.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title purple">📁 4. Generación y Auditoría</h3>
+      <ul class="step-list">
+        <li>Actualización automática de las <strong>7 plantillas oficiales Excel</strong>.</li>
+        <li>Generación del <strong>Reporte de Auditoría</strong> (4 hojas estructuradas).</li>
+        <li>Empaquetado 1-clic con <strong>Archify</strong> en <code>archives/</code>.</li>
+        <li>Publicación y versionado SemVer con <strong>GitHub Actions</strong>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="diagram-container">
+    <h3 style="margin-top: 0; margin-bottom: 1rem; font-size: 1.1rem;">📊 Diagrama de Secuencia del Pipeline</h3>
+    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor Operador as Operador / Usuario
+    participant UI as Streamlit Web UI (:8502)
+    participant ETL as Motor ETL (etl_maestro.py)
+    participant Maestro as Maestro k.xlsx (104 Hojas)
+    participant Auditoria as Motor Auditoria (Opción B)
+    participant Plantillas as 7 Plantillas Excel
+    participant Reporte as Reporte Auditoria Excel
+
+    Operador->>UI: Clic '🚀 Ejecutar Pipeline ETL'
+    UI->>ETL: Invoca ejecutar_pipeline(rango='A2:A35')
+    
+    rect rgb(20, 40, 60)
+        note over ETL,Maestro: Fase 1: Extracción Estricta y Filtrado
+        ETL->>Maestro: Lee pestaña 'Resumen!A2:A35' (34 Unidades)
+        ETL->>Maestro: Lee Conductores ('LISTA' y 'CONDUCT.')
+        ETL->>Maestro: Extrae Primer Recuadro por Hoja (P1..P22, RT, RS)
+        ETL->>Maestro: Extrae Tanques, Mochila, Aro, Condición y PSI
+    end
+
+    rect rgb(25, 50, 40)
+        note over ETL,Plantillas: Fase 2: Generación de 7 Plantillas Oficiales
+        ETL->>Plantillas: Actualiza Vehículos (68 unidades, 11 columnas)
+        ETL->>Plantillas: Actualiza Conductores y Asignaciones
+        ETL->>Plantillas: Actualiza Neumáticos Únicos (781 reg. Opción B)
+        ETL->>Plantillas: Actualiza Movimientos Físicos (804 montajes)
+        ETL->>Plantillas: Actualiza Comparativa Combustible y Grifos
+    end
+
+    rect rgb(45, 30, 60)
+        note over ETL,Reporte: Fase 3: Conciliación y Auditoría
+        ETL->>Auditoria: Transfiere datos de extracción
+        Auditoria->>Reporte: Genera Reporte_Auditoria_Conciliacion_Neumaticos_DAG.xlsx
+        Auditoria-->>UI: Retorna métricas, tiempos y estado
+    end
+
+    UI-->>Operador: Renderiza 6 tarjetas KPIs, Gráficos Plotly y Tablas Interactivas
+    </pre>
+  </div>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default',
+      securityLevel: 'loose'
+    });
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      document.getElementById('theme-icon').textContent = next === 'dark' ? '☀️' : '🌙';
+      location.reload();
+    }
+  </script>
+</body>
+</html>

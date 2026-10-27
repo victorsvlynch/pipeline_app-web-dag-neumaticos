@@ -10,6 +10,11 @@ Reingeniería del pipeline de datos utilizando **Docker + Streamlit + Python**, 
 
 ```text
 Pipeline_app-web-dag-neumaticos/
+├── .github/
+│   └── workflows/
+│       ├── release.yml                                       # Generador de Releases SemVer automáticos
+│       └── ci.yml                                            # Verificación CI de sintaxis y ejecución ETL
+├── archives/                                                 # Carpeta de respaldos y snapshots generados
 ├── Archivos/
 │   ├── Maestro/
 │   │   └── k.xlsx                                            # Archivo Excel maestro origen
@@ -21,9 +26,22 @@ Pipeline_app-web-dag-neumaticos/
 │   │   ├── Plantilla_Asignacion_Movimiento_Neumaticos_DAG.xlsx
 │   │   ├── Plantilla_Registro_Masivo_Comparativa_DAG.xlsx
 │   │   └── Plantilla_Registro_Masivo_Grifos_DAG.xlsx
-│   └── Plantillas_Backup/                                    # Copia de seguridad original
+│   ├── Plantillas_Backup/                                    # Copia de seguridad original
+│   └── Reportes/                                             # Reportes de auditoría y conciliación
 ├── scripts/
 │   ├── etl_maestro.py                                        # Motor ETL con filtro Resumen!A2:A35
+│   ├── generar_reporte_auditoria.py                          # Motor de Auditoría y Conciliación Opción B
+│   ├── auto_push/                                            # Automatización de Git, Gemini y Respaldos
+│   │   ├── auto_push.ps1 / .bat / .py                        # Commits convencionales con IA y Push
+│   │   ├── archify.ps1 / .bat                                # Empaquetado de plantillas y snapshots
+│   │   ├── api_keys.txt                                      # Configuración de Gemini API
+│   │   └── README.md
+│   ├── diagramas/                                            # Arquitectura interactiva y diagramas
+│   │   ├── arquitectura.json / .html                         # Diagrama de arquitectura interactivo (Archify)
+│   │   ├── flujo_etl_neumaticos.html                         # Flujo interactivo del pipeline ETL
+│   │   ├── secuencia_etl.mmd                                 # Secuencia Mermaid
+│   │   ├── render_arquitectura.ps1 / .bat                    # Compilador con Archify CLI
+│   │   └── README.md
 │   └── __init__.py
 ├── app.py                                                    # Aplicación Web Streamlit interactiva
 ├── Dockerfile                                                # Contenedor Streamlit + Python 3.11
