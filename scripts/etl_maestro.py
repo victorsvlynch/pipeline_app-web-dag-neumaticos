@@ -10,7 +10,11 @@ import os
 import re
 import sys
 import time
+import json
 import logging
+import urllib.request
+import urllib.parse
+import http.cookiejar
 from datetime import datetime
 import openpyxl
 
@@ -70,15 +74,210 @@ def es_codigo_valido(code_raw):
 
 
 def normalizar_codigo_neumatico(code_raw):
-    """Convierte el código a número entero si es numérico, o cadena limpia."""
+    """
+    Normaliza el código de neumático para que tenga siempre exactamente 7 dígitos.
+    Si tiene menos de 7 dígitos, antepone ceros a la izquierda (zfill).
+    Maneja enteros, flotantes de Excel (ej. 200095.0) y cadenas.
+    """
+    if code_raw is None:
+        return ""
     code_str = str(code_raw).strip()
+    if not code_str:
+        return ""
+
     try:
         f_val = float(code_str)
         if f_val.is_integer():
-            return int(f_val)
-        return int(f_val)
+            return f"{int(f_val):07d}"
+        return f"{int(f_val):07d}"
     except (ValueError, TypeError):
+        digitos = re.sub(r'\D', '', code_str)
+        if digitos and len(code_str) < 7:
+            return code_str.zfill(7)
         return code_str
+
+
+def normalizar_dni(dni_raw):
+    """
+    Normaliza el DNI para que tenga siempre exactamente 8 dígitos.
+    Si tiene menos de 8 dígitos, antepone ceros a la izquierda (zfill).
+    Maneja enteros, flotantes de Excel (ej. 1038628.0), strings y números con licencia.
+    """
+    if dni_raw is None:
+        return ""
+    try:
+        if isinstance(dni_raw, (int, float)):
+            f_val = float(dni_raw)
+            if f_val.is_integer():
+                val_str = str(int(f_val))
+            else:
+                val_str = str(dni_raw).strip()
+        else:
+            val_str = str(dni_raw).strip()
+            if '.' in val_str:
+                try:
+                    f_val = float(val_str)
+                    if f_val.is_integer():
+                        val_str = str(int(f_val))
+                except ValueError:
+                    pass
+    except Exception:
+        val_str = str(dni_raw).strip()
+
+    digitos = re.sub(r'\D', '', val_str)
+    if digitos:
+        if len(digitos) < 8:
+            return digitos.zfill(8)
+        elif len(digitos) == 8:
+            return digitos
+        else:
+            m = re.search(r'\d{8}', digitos)
+            if m:
+                return m.group(0)
+            return digitos[-8:]
+    return val_str.zfill(8) if len(val_str) < 8 else val_str
+
+
+def extraer_dni_de_texto(texto):
+    """
+    Extrae o normaliza un DNI a partir de un texto (ej. celda de licencia o DNI directo).
+    Garantiza siempre 8 dígitos rellenando con ceros a la izquierda si tiene menos.
+    """
+    if not texto:
+        return None
+    val_str = str(texto).strip()
+    if not val_str:
+        return None
+
+    nums = re.findall(r'\d+', val_str)
+    if not nums:
+        return None
+
+    for n in nums:
+        if len(n) == 8:
+            return n
+
+    nums_validos = [n for n in nums if len(n) <= 8]
+    if nums_validos:
+        mas_largo = max(nums_validos, key=len)
+        return mas_largo.zfill(8)
+
+    mas_largo = max(nums, key=len)
+    m = re.search(r'\d{8}', mas_largo)
+    if m:
+        return m.group(0)
+    return mas_largo[-8:]
+
+
+def consultar_nombre_eldni(dni_raw, plantillas_dir=None):
+    """
+    Consulta un DNI en https://eldni.com/pe/buscar-datos-por-dni.
+    Ingresa el DNI en el input 'dni' y extrae el resultado del input id='completos'.
+    Si no existe o no tiene valor, retorna 'DNI INCORRECTO'.
+    Utiliza una caché persistente en disco (Archivos/cache_conductores_eldni.json)
+    para evitar consultas redundantes y mitigar límites de tasa HTTP 429.
+    """
+    dni_str = normalizar_dni(dni_raw)
+    if not dni_str or len(dni_str) != 8 or not dni_str.isdigit():
+        return "DNI INCORRECTO"
+
+    # Determinar ruta de caché en el directorio Archivos
+    cache_path = None
+    if plantillas_dir:
+        dir_archivos = os.path.dirname(os.path.abspath(plantillas_dir))
+        posible_cache = os.path.join(dir_archivos, 'cache_conductores_eldni.json')
+        if os.path.exists(os.path.dirname(posible_cache)):
+            cache_path = posible_cache
+
+    if not cache_path:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cache_path = os.path.join(base_dir, 'Archivos', 'cache_conductores_eldni.json')
+
+    cache = {}
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                cache = json.load(f)
+        except Exception:
+            cache = {}
+
+    if dni_str in cache and cache[dni_str]:
+        return cache[dni_str]
+
+    # Si es DNI sintético asignado por el sistema (ej. 900000XX)
+    if dni_str.startswith('900000'):
+        cache[dni_str] = "DNI INCORRECTO"
+        try:
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(cache, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return "DNI INCORRECTO"
+
+    logger.info(f"Consultando DNI {dni_str} en https://eldni.com/pe/buscar-datos-por-dni...")
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Referer': 'https://eldni.com/pe/buscar-datos-por-dni',
+        'Origin': 'https://eldni.com',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+    }
+    cj = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+
+    for intento in range(1, 4):
+        try:
+            # 1. Obtener token CSRF
+            req_get = urllib.request.Request('https://eldni.com/pe/buscar-datos-por-dni', headers=headers)
+            resp_get = opener.open(req_get, timeout=12)
+            html_get = resp_get.read().decode('utf-8', errors='ignore')
+            m_tok = re.search(r'name="_token"\s+value="([^"]+)"', html_get)
+            if not m_tok:
+                time.sleep(1.5)
+                continue
+            token = m_tok.group(1)
+
+            # 2. Enviar formulario POST con el DNI
+            data = urllib.parse.urlencode({'_token': token, 'dni': dni_str}).encode('utf-8')
+            req_post = urllib.request.Request('https://eldni.com/pe/buscar-datos-por-dni', data=data, headers=headers)
+            time.sleep(1.5)
+            resp_post = opener.open(req_post, timeout=15)
+            html_post = resp_post.read().decode('utf-8', errors='ignore')
+
+            # 3. Extraer valor de <input ... id="completos" value="..." ...>
+            m_comp = re.search(r'id="completos"[^>]*value="([^"]*)"', html_post)
+            if not m_comp:
+                m_comp = re.search(r'value="([^"]*)"[^>]*id="completos"', html_post)
+
+            nombre_res = "DNI INCORRECTO"
+            if m_comp:
+                val = m_comp.group(1).strip()
+                if val:
+                    nombre_res = val.upper()
+
+            cache[dni_str] = nombre_res
+            try:
+                with open(cache_path, 'w', encoding='utf-8') as f:
+                    json.dump(cache, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+            return nombre_res
+
+        except urllib.error.HTTPError as e:
+            logger.warning(f"Intento {intento}/3: Error HTTP {e.code} para DNI {dni_str} en eldni.com")
+            time.sleep(3.5 * intento)
+        except Exception as e:
+            logger.warning(f"Intento {intento}/3: Excepción al consultar DNI {dni_str}: {e}")
+            time.sleep(2.0)
+
+    # Si no se pudo obtener respuesta válida
+    cache[dni_str] = "DNI INCORRECTO"
+    try:
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    return "DNI INCORRECTO"
 
 
 def obtener_unidades_activas_resumen(wb, rango_resumen="A2:A35"):
@@ -128,10 +327,26 @@ def obtener_unidades_activas_resumen(wb, rango_resumen="A2:A35"):
     return unidades
 
 
-def extraer_datos_maestro(ruta_maestro, rango_resumen="A2:A35"):
+def obtener_lista_placas_maestro(ruta_maestro, rango_resumen="A2:A35"):
+    """
+    Lee rápidamente la pestaña 'Resumen' del archivo maestro k.xlsx
+    y retorna la lista de unidades activas {tracto_placa: cisterna_placa}.
+    Permite popular selectores de placas en interfaces interactivas.
+    """
+    if not os.path.exists(ruta_maestro):
+        return {}
+    wb = openpyxl.load_workbook(ruta_maestro, data_only=True, read_only=True)
+    try:
+        return obtener_unidades_activas_resumen(wb, rango_resumen=rango_resumen)
+    finally:
+        wb.close()
+
+
+def extraer_datos_maestro(ruta_maestro, rango_resumen="A2:A35", placas_seleccionadas=None):
     """
     Lee el archivo maestro k.xlsx y extrae datos EXCLUSIVAMENTE para las unidades
-    indicadas en 'Resumen' según el rango especificado (por defecto A2 a A35).
+    indicadas en 'Resumen' según el rango especificado (por defecto A2 a A35),
+    opcionalmente filtrando por una lista o conjunto específico de placas de tracto.
     """
     logger.info(f"Cargando archivo maestro: {ruta_maestro}")
     if not os.path.exists(ruta_maestro):
@@ -141,6 +356,21 @@ def extraer_datos_maestro(ruta_maestro, rango_resumen="A2:A35"):
 
     # 1. Obtener lista estricta de unidades desde Resumen
     unidades_activas = obtener_unidades_activas_resumen(wb, rango_resumen=rango_resumen)
+
+    # 1.1 Filtrar selectivamente por placas elegidas por el usuario
+    if placas_seleccionadas:
+        placas_limpias = set()
+        for p in placas_seleccionadas:
+            if not p:
+                continue
+            m = REGEX_PLACA_TOLERANTE.search(str(p).strip().upper())
+            if m:
+                placas_limpias.add(f"{m.group(1)}-{m.group(2)}")
+            else:
+                placas_limpias.add(str(p).strip().upper())
+        unidades_activas = {k: v for k, v in unidades_activas.items() if k in placas_limpias}
+        logger.info(f"Filtro selectivo aplicado: {len(unidades_activas)} unidades activas seleccionadas de {len(placas_limpias)} indicadas.")
+
     placas_tracto_validas = set(unidades_activas.keys())
 
     # 2. Extraer catálogo de conductores desde la hoja 'LISTA'
@@ -160,8 +390,7 @@ def extraer_datos_maestro(ruta_maestro, rango_resumen="A2:A35"):
             m_tr = REGEX_PLACA_TOLERANTE.search(tracto_raw)
             clean_tr = f"{m_tr.group(1)}-{m_tr.group(2)}" if m_tr else None
 
-            dni_match = REGEX_DNI.search(lic)
-            dni = dni_match.group(0) if dni_match else None
+            dni = extraer_dni_de_texto(lic)
 
             if clean_tr:
                 conductores_maestro[clean_tr] = {
@@ -195,6 +424,7 @@ def extraer_datos_maestro(ruta_maestro, rango_resumen="A2:A35"):
     cisternas = {}
     neumaticos = {}
     movimientos = []
+    inspecciones = []
     conductores_finales = {}
     asignaciones_finales = {}
 
@@ -359,6 +589,8 @@ def extraer_datos_maestro(ruta_maestro, rango_resumen="A2:A35"):
             c_nombre = 'CONDUCTOR NO ASIGNADO'
             c_dni = str(dni_sintetico_base + len(conductores_finales) + 1)
 
+        c_dni = normalizar_dni(c_dni)
+
         conductores_finales[c_dni] = {
             'dni': c_dni,
             'nombre': c_nombre,
@@ -413,6 +645,25 @@ def extraer_datos_maestro(ruta_maestro, rango_resumen="A2:A35"):
                         'motivo': 'Agregado Masivo Manual'
                     })
 
+                    obs_t = 'Desgaste regular normal'
+                    if abs(prof_int - prof_ext) >= 3:
+                        obs_t = 'Desgaste irregular - revisar alineación'
+                    elif prof_cent <= 3 or prof_int <= 3 or prof_ext <= 3:
+                        obs_t = 'Cocada crítica - próximo a reencauche'
+                    elif t_psi < 100:
+                        obs_t = f'Baja presión ({t_psi} PSI)'
+
+                    inspecciones.append({
+                        'placa': tracto_placa,
+                        'codigo': code_val,
+                        'posicion': pos,
+                        'km': int(km) if isinstance(km, (int, float)) else km,
+                        'prof_int': prof_int,
+                        'prof_cent': prof_cent,
+                        'prof_ext': prof_ext,
+                        'observacion': obs_t
+                    })
+
         # Neumáticos de la Cisterna (P11 a P22, RS) estrictamente dentro del primer recuadro
         if cisterna_placa and cisterna_row_idx:
             for p_i, pos in enumerate(POSICIONES_CISTERNA):
@@ -456,6 +707,25 @@ def extraer_datos_maestro(ruta_maestro, rango_resumen="A2:A35"):
                             'motivo': 'Agregado Masivo Manual'
                         })
 
+                        obs_c = 'Presión correcta'
+                        if abs(prof_int - prof_ext) >= 3:
+                            obs_c = 'Desgaste irregular - verificar ejes'
+                        elif prof_cent <= 3 or prof_int <= 3 or prof_ext <= 3:
+                            obs_c = 'Cocada crítica - próximo a reencauche'
+                        elif t_psi < 100:
+                            obs_c = f'Baja presión ({t_psi} PSI)'
+
+                        inspecciones.append({
+                            'placa': cisterna_placa,
+                            'codigo': code_val,
+                            'posicion': pos,
+                            'km': int(km) if isinstance(km, (int, float)) else km,
+                            'prof_int': prof_int,
+                            'prof_cent': prof_cent,
+                            'prof_ext': prof_ext,
+                            'observacion': obs_c
+                        })
+
     wb.close()
 
     logger.info(f"=== EXTRACCIÓN DE UNIDADES ACTIVAS (RESUMEN!{rango_resumen}) COMPLETADA ===")
@@ -464,6 +734,7 @@ def extraer_datos_maestro(ruta_maestro, rango_resumen="A2:A35"):
     logger.info(f" - Conductores: {len(conductores_finales)}")
     logger.info(f" - Neumáticos únicos: {len(neumaticos)}")
     logger.info(f" - Movimientos / Asignaciones: {len(movimientos)}")
+    logger.info(f" - Inspecciones técnicas: {len(inspecciones)}")
 
     return {
         'conductores': conductores_finales,
@@ -472,14 +743,16 @@ def extraer_datos_maestro(ruta_maestro, rango_resumen="A2:A35"):
         'cisternas': cisternas,
         'neumaticos': neumaticos,
         'movimientos': movimientos,
+        'inspecciones': inspecciones,
         'unidades_activas': unidades_activas
     }
 
 
-def _actualizar_plantilla_excel(ruta_archivo, nombre_hoja, filas_datos, reintentos=3, pausa=0.6):
+def _actualizar_plantilla_excel(ruta_archivo, nombre_hoja, filas_datos, reintentos=3, pausa=0.6, formato_columna_a=None, formatos_columnas=None):
     """
     Actualiza la hoja de datos principal del archivo plantilla conservando encabezados
     y guías. Incluye reintentos ante bloqueos temporales de archivos en Windows.
+    Permite formatear columnas como texto ('@') para conservar ceros a la izquierda (ej. DNI).
     """
     if not os.path.exists(ruta_archivo):
         raise FileNotFoundError(f"Plantilla no encontrada: {ruta_archivo}")
@@ -498,6 +771,22 @@ def _actualizar_plantilla_excel(ruta_archivo, nombre_hoja, filas_datos, reintent
 
         for fila in filas_datos:
             ws.append(fila)
+
+        # Aplicar formato de celda si se requiere (ej. formato texto '@' para DNI con ceros)
+        fmts = {}
+        if formatos_columnas:
+            fmts.update(formatos_columnas)
+        if formato_columna_a:
+            fmts[1] = formato_columna_a
+
+        if fmts:
+            for col_idx, fmt in fmts.items():
+                for r_idx in range(2, ws.max_row + 1):
+                    cell = ws.cell(row=r_idx, column=col_idx)
+                    cell.number_format = fmt
+                    if cell.value is not None and fmt == '@':
+                        cell.value = str(cell.value)
+                        cell.data_type = 's'
 
         guardado = False
         ultimo_error = None
@@ -567,24 +856,49 @@ def generar_plantilla_vehiculos(plantillas_dir, tractos, cisternas):
 
 
 def generar_plantilla_conductores(plantillas_dir, conductores):
-    """Genera Plantilla_Registro_Masivo_Conductores_DAG.xlsx"""
+    """
+    Genera Plantilla_Registro_Masivo_Conductores_DAG.xlsx.
+    Garantiza que la columna A (DNI) tenga siempre 8 dígitos rellenando con ceros a la izquierda si tiene menos.
+    Antes de escribir, consulta el DNI en https://eldni.com/pe/buscar-datos-por-dni (input id='dni')
+    y copia los resultados (input id='completos').
+    - Si existe: Columna A = DNI (8 dígitos), Columna B = Nombre oficial de id='completos'.
+    - Si no existe: Columna A = 'DNI INCORRECTO', Columna B = Nombre original del conductor (dejado como está).
+    """
     archivo = os.path.join(plantillas_dir, 'Plantilla_Registro_Masivo_Conductores_DAG.xlsx')
     filas = []
 
-    for dni in sorted(conductores.keys()):
+    for dni in sorted(conductores.keys(), key=lambda x: str(x)):
         c = conductores[dni]
+        dni_val = normalizar_dni(c.get('dni', dni))
+        nombre_original = c.get('nombre', '')
+
+        # Consultar en eldni.com (utiliza caché persistente en disco)
+        nombre_oficial = consultar_nombre_eldni(dni_val, plantillas_dir)
+
+        if nombre_oficial == "DNI INCORRECTO":
+            col_a_dni = "DNI INCORRECTO"
+            col_b_nombre = nombre_original
+        else:
+            col_a_dni = dni_val
+            col_b_nombre = nombre_oficial
+
+        # Actualizar datos en memoria para coherencia en el flujo
+        c['dni_display'] = col_a_dni
+        c['dni'] = col_a_dni
+        c['nombre'] = col_b_nombre
+
         filas.append([
-            c['dni'],
-            c['nombre'],
+            col_a_dni,
+            col_b_nombre,
             c['estado']
         ])
 
-    _actualizar_plantilla_excel(archivo, 'PLANTILLA_CONDUCTORES', filas)
+    _actualizar_plantilla_excel(archivo, 'PLANTILLA_CONDUCTORES', filas, formato_columna_a='@')
     return len(filas)
 
 
 def generar_plantilla_asignacion_conductores(plantillas_dir, asignaciones, tractos, conductores):
-    """Genera Plantilla_Registro_Masivo_Asignacion_Conductores_DAG.xlsx"""
+    """Genera Plantilla_Registro_Masivo_Asignacion_Conductores_DAG.xlsx asegurando 8 dígitos en DNI y nombres sincronizados."""
     archivo = os.path.join(plantillas_dir, 'Plantilla_Registro_Masivo_Asignacion_Conductores_DAG.xlsx')
     filas = []
     fecha_actual = datetime.now().strftime('%Y-%m-%d')
@@ -592,27 +906,51 @@ def generar_plantilla_asignacion_conductores(plantillas_dir, asignaciones, tract
     for placa in sorted(tractos.keys()):
         if placa in asignaciones:
             asig = asignaciones[placa]
+            dni_val = normalizar_dni(asig.get('dni', ''))
+            nombre_orig = asig.get('nombre', '')
+
+            # Sincronizar con el conductor validado
+            c_match = conductores.get(dni_val)
+            if c_match and 'dni_display' in c_match:
+                dni_final = c_match['dni_display']
+                nombre_final = c_match['nombre']
+            else:
+                nombre_oficial = consultar_nombre_eldni(dni_val, plantillas_dir)
+                if nombre_oficial == "DNI INCORRECTO":
+                    dni_final = "DNI INCORRECTO"
+                    nombre_final = nombre_orig
+                else:
+                    dni_final = dni_val
+                    nombre_final = nombre_oficial
+
+            asig['dni'] = dni_final
+            asig['nombre'] = nombre_final
+
             filas.append([
                 placa,
-                asig['dni'],
-                asig['nombre'],
+                dni_final,
+                nombre_final,
                 fecha_actual,
                 'ASIGNACIÓN MASIVA AUTOMÁTICA DAG'
             ])
 
-    _actualizar_plantilla_excel(archivo, 'PLANTILLA_ASIGNACIONES', filas)
+    _actualizar_plantilla_excel(archivo, 'PLANTILLA_ASIGNACIONES', filas, formatos_columnas={2: '@'})
     return len(filas)
 
 
 def generar_plantilla_neumaticos(plantillas_dir, neumaticos):
-    """Genera Plantilla_Registro_Masivo_Neumaticos_DAG.xlsx"""
+    """
+    Genera Plantilla_Registro_Masivo_Neumaticos_DAG.xlsx.
+    Garantiza que la columna A (CODIGO) tenga siempre 7 dígitos rellenando con ceros a la izquierda si tiene menos.
+    """
     archivo = os.path.join(plantillas_dir, 'Plantilla_Registro_Masivo_Neumaticos_DAG.xlsx')
     filas = []
 
     for codigo in sorted(neumaticos.keys(), key=lambda x: str(x)):
         n = neumaticos[codigo]
+        cod_val = normalizar_codigo_neumatico(n['codigo'])
         filas.append([
-            n['codigo'],
+            cod_val,
             n['marca'],
             n['medida'],
             n['tipo'],
@@ -626,25 +964,26 @@ def generar_plantilla_neumaticos(plantillas_dir, neumaticos):
             n['psi']
         ])
 
-    _actualizar_plantilla_excel(archivo, 'PLANTILLA_NEUMATICOS', filas)
+    _actualizar_plantilla_excel(archivo, 'PLANTILLA_NEUMATICOS', filas, formato_columna_a='@')
     return len(filas)
 
 
 def generar_plantilla_movimientos(plantillas_dir, movimientos):
-    """Genera Plantilla_Asignacion_Movimiento_Neumaticos_DAG.xlsx"""
+    """Genera Plantilla_Asignacion_Movimiento_Neumaticos_DAG.xlsx asegurando 7 dígitos en CODIGO."""
     archivo = os.path.join(plantillas_dir, 'Plantilla_Asignacion_Movimiento_Neumaticos_DAG.xlsx')
     filas = []
 
     for m in movimientos:
+        cod_val = normalizar_codigo_neumatico(m['codigo'])
         filas.append([
             m['placa'],
-            m['codigo'],
+            cod_val,
             m['posicion'],
             m['km'],
             m['motivo']
         ])
 
-    _actualizar_plantilla_excel(archivo, 'PLANTILLA_MOVIMIENTOS', filas)
+    _actualizar_plantilla_excel(archivo, 'PLANTILLA_MOVIMIENTOS', filas, formatos_columnas={2: '@'})
     return len(filas)
 
 
@@ -681,7 +1020,33 @@ def generar_plantilla_grifos(plantillas_dir):
     return len(grifos_base)
 
 
-def ejecutar_pipeline(maestro_path=None, plantillas_dir=None, rango_resumen="A2:A35"):
+def generar_plantilla_inspecciones(plantillas_dir, inspecciones):
+    """
+    Genera Plantilla_Inspeccion_Neumaticos_DAG.xlsx asegurando 7 dígitos en CODIGO_NEUMATICO.
+    Contiene las 804 mediciones de desgaste (profundidades int, cent, ext) y kilometraje
+    correspondientes a los neumáticos montados en la flota activa.
+    """
+    archivo = os.path.join(plantillas_dir, 'Plantilla_Inspeccion_Neumaticos_DAG.xlsx')
+    filas = []
+
+    for ins in inspecciones:
+        cod_val = normalizar_codigo_neumatico(ins['codigo'])
+        filas.append([
+            ins['placa'],
+            cod_val,
+            ins['posicion'],
+            ins['km'],
+            ins['prof_int'],
+            ins['prof_cent'],
+            ins['prof_ext'],
+            ins.get('observacion', 'Desgaste regular normal')
+        ])
+
+    _actualizar_plantilla_excel(archivo, 'PLANTILLA_INSPECCIONES', filas, formatos_columnas={2: '@'})
+    return len(filas)
+
+
+def ejecutar_pipeline(maestro_path=None, plantillas_dir=None, rango_resumen="A2:A35", placas_seleccionadas=None):
     """
     Función principal de ejecución del Pipeline ETL.
     """
@@ -711,15 +1076,16 @@ def ejecutar_pipeline(maestro_path=None, plantillas_dir=None, rango_resumen="A2:
     logger.info(f"Ruta Maestro: {maestro_path}")
     logger.info(f"Directorio Plantillas: {plantillas_dir}")
 
-    # 1. Extracción con filtro Resumen
-    datos = extraer_datos_maestro(maestro_path, rango_resumen=rango_resumen)
+    # 1. Extracción con filtro Resumen y placas seleccionadas
+    datos = extraer_datos_maestro(maestro_path, rango_resumen=rango_resumen, placas_seleccionadas=placas_seleccionadas)
 
-    # 2. Generación de las 7 plantillas
+    # 2. Generación de las 8 plantillas oficiales
     n_vehiculos = generar_plantilla_vehiculos(plantillas_dir, datos['tractos'], datos['cisternas'])
     n_conductores = generar_plantilla_conductores(plantillas_dir, datos['conductores'])
     n_asig_conductores = generar_plantilla_asignacion_conductores(plantillas_dir, datos['asignaciones_conductores'], datos['tractos'], datos['conductores'])
     n_neumaticos = generar_plantilla_neumaticos(plantillas_dir, datos['neumaticos'])
     n_movimientos = generar_plantilla_movimientos(plantillas_dir, datos['movimientos'])
+    n_inspecciones = generar_plantilla_inspecciones(plantillas_dir, datos.get('inspecciones', []))
     n_comparativa = generar_plantilla_comparativa(plantillas_dir, datos['tractos'])
     n_grifos = generar_plantilla_grifos(plantillas_dir)
 
@@ -746,6 +1112,7 @@ def ejecutar_pipeline(maestro_path=None, plantillas_dir=None, rango_resumen="A2:
         'asignaciones_conductores_total': n_asig_conductores,
         'neumaticos_total': n_neumaticos,
         'movimientos_total': n_movimientos,
+        'inspecciones_total': n_inspecciones,
         'comparativas_total': n_comparativa,
         'grifos_total': n_grifos,
         'reporte_auditoria': reporte_auditoria_path

@@ -18,12 +18,13 @@ Pipeline_app-web-dag-neumaticos/
 ├── Archivos/
 │   ├── Maestro/
 │   │   └── k.xlsx                                            # Archivo Excel maestro origen
-│   ├── Plantillas/                                           # 7 plantillas oficiales destino
+│   ├── Plantillas/                                           # 8 plantillas oficiales destino
 │   │   ├── Plantilla_Registro_Masivo_Vehiculos_DAG.xlsx
 │   │   ├── Plantilla_Registro_Masivo_Conductores_DAG.xlsx
 │   │   ├── Plantilla_Registro_Masivo_Asignacion_Conductores_DAG.xlsx
 │   │   ├── Plantilla_Registro_Masivo_Neumaticos_DAG.xlsx
 │   │   ├── Plantilla_Asignacion_Movimiento_Neumaticos_DAG.xlsx
+│   │   ├── Plantilla_Inspeccion_Neumaticos_DAG.xlsx
 │   │   ├── Plantilla_Registro_Masivo_Comparativa_DAG.xlsx
 │   │   └── Plantilla_Registro_Masivo_Grifos_DAG.xlsx
 │   ├── Plantillas_Backup/                                    # Copia de seguridad original
@@ -94,7 +95,7 @@ La aplicación ejecuta y visualiza el pipeline etapa por etapa:
 [7] ⛽ Generación de Tabla Comparativa de Combustible (102 Registros) y Grifos (5)
        │
        ▼
-[8] 💾 Actualización de las 7 Plantillas Oficiales y Generación del Reporte de Auditoría
+[8] 💾 Actualización de las 8 Plantillas Oficiales y Generación del Reporte de Auditoría
 ```
 
 ---

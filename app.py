@@ -34,13 +34,15 @@ if SCRIPTS_DIR not in sys.path:
 
 from etl_maestro import (
     extraer_datos_maestro,
+    obtener_lista_placas_maestro,
     generar_plantilla_vehiculos,
     generar_plantilla_conductores,
     generar_plantilla_asignacion_conductores,
     generar_plantilla_neumaticos,
     generar_plantilla_movimientos,
     generar_plantilla_comparativa,
-    generar_plantilla_grifos
+    generar_plantilla_grifos,
+    generar_plantilla_inspecciones
 )
 try:
     from generar_reporte_auditoria import crear_reporte_auditoria_excel
@@ -51,9 +53,14 @@ RUTA_MAESTRO_DEFECTO = os.path.join(BASE_DIR, "Archivos", "Maestro", "k.xlsx")
 DIR_PLANTILLAS_DEFECTO = os.path.join(BASE_DIR, "Archivos", "Plantillas")
 
 @st.cache_data(show_spinner=False)
-def cargar_datos_maestro_cached(ruta, rango="A2:A35"):
+def obtener_placas_resumen_cached(ruta, rango="A2:A35"):
+    """Lee y cachea las placas activas del archivo maestro para el selector."""
+    return obtener_lista_placas_maestro(ruta, rango_resumen=rango)
+
+@st.cache_data(show_spinner=False)
+def cargar_datos_maestro_cached(ruta, rango="A2:A35", placas_tuple=None):
     """Carga y cachea la extracción del archivo maestro para navegación fluida."""
-    return extraer_datos_maestro(ruta, rango_resumen=rango)
+    return extraer_datos_maestro(ruta, rango_resumen=rango, placas_seleccionadas=placas_tuple)
 
 # Estilos CSS personalizados
 st.markdown("""
@@ -125,11 +132,6 @@ with st.sidebar:
     ruta_maestro = st.text_input("Archivo Maestro (k.xlsx):", value=RUTA_MAESTRO_DEFECTO)
     dir_plantillas = st.text_input("Carpeta Plantillas Destino:", value=DIR_PLANTILLAS_DEFECTO)
 
-    st.subheader("Filtro de Carga")
-    rango_filas = st.text_input("Rango en hoja 'Resumen':", value="A2:A35", help="Celdas de las unidades activas en la pestaña Resumen.")
-
-    st.divider()
-
     # Estado de los archivos en disco
     maestro_ok = os.path.exists(ruta_maestro)
     plantillas_ok = os.path.exists(dir_plantillas)
@@ -144,11 +146,67 @@ with st.sidebar:
     if plantillas_ok:
         archivos_p = [f for f in os.listdir(dir_plantillas) if f.endswith('.xlsx') and not f.startswith('~$')]
         if "Reporte_Auditoria_Conciliacion_Neumaticos_DAG.xlsx" in archivos_p:
-            st.success(f"Archivos en destino: {len(archivos_p)} (7 oficiales + Reporte Auditoría)")
+            st.success(f"Archivos en destino: {len(archivos_p)} (8 oficiales + Reporte Auditoría)")
         else:
             st.info(f"Plantillas en destino: {len(archivos_p)} archivos")
     else:
         st.warning("Directorio de plantillas no existe")
+
+    st.divider()
+
+    st.subheader("Filtro de Carga")
+    rango_filas = st.text_input("Rango en hoja 'Resumen':", value="A2:A35", help="Celdas de las unidades activas en la pestaña Resumen.")
+
+    # Cargar catálogo de unidades disponibles desde el maestro
+    unidades_disponibles = {}
+    if maestro_ok:
+        try:
+            unidades_disponibles = obtener_placas_resumen_cached(ruta_maestro, rango_filas)
+        except Exception:
+            unidades_disponibles = {}
+
+    lista_placas = list(unidades_disponibles.keys())
+
+    st.subheader("🚛 Selección de Placas")
+    modo_seleccion_placas = st.radio(
+        "Modo de Extracción:",
+        options=["Todas las unidades activas", "Seleccionar placas específicas"],
+        index=0,
+        help="Elige si deseas extraer la flota completa de la pestaña Resumen o únicamente las placas que tú elijas."
+    )
+
+    placas_a_procesar = None
+    if modo_seleccion_placas == "Seleccionar placas específicas":
+        if lista_placas:
+            if 'sel_placas_usuario' not in st.session_state:
+                st.session_state['sel_placas_usuario'] = lista_placas[:5] if len(lista_placas) >= 5 else lista_placas
+
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                if st.button("Marcar Todas", use_container_width=True):
+                    st.session_state['sel_placas_usuario'] = lista_placas
+                    st.rerun()
+            with col_b2:
+                if st.button("Desmarcar", use_container_width=True):
+                    st.session_state['sel_placas_usuario'] = []
+                    st.rerun()
+
+            placas_elegidas = st.multiselect(
+                "Elige las placas de tractocamión a extraer:",
+                options=lista_placas,
+                default=st.session_state['sel_placas_usuario'],
+                format_func=lambda p: f"{p} (Cisterna: {unidades_disponibles.get(p, 'Sin cisterna')})",
+                help="Selecciona una o más placas para extraer sus datos del archivo maestro."
+            )
+            st.session_state['sel_placas_usuario'] = placas_elegidas
+            placas_a_procesar = placas_elegidas
+
+            if not placas_elegidas:
+                st.warning("⚠️ Debes seleccionar al menos una placa para ejecutar la extracción.")
+            else:
+                st.caption(f"🎯 **{len(placas_elegidas)}** de {len(lista_placas)} unidades seleccionadas.")
+        else:
+            st.info("No se encontraron placas disponibles en la pestaña Resumen.")
 
     st.divider()
     btn_ejecutar = st.button("🚀 Ejecutar Pipeline ETL", type="primary", width="stretch")
@@ -162,11 +220,14 @@ with col_logo:
     st.markdown("<h1>🚚</h1>", unsafe_allow_html=True)
 with col_titulo:
     st.markdown("<div class='main-header'>Pipeline ETL - Extracción de Maestro a Plantillas</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-header'>Transportes Díaz Acarreos Generales S.A.C. | Flota Operativa Activa (Resumen A2:A35)</div>", unsafe_allow_html=True)
+    if 'placas_filtradas_activas' in st.session_state and st.session_state['placas_filtradas_activas']:
+        st.markdown(f"<div class='sub-header'>Transportes Díaz Acarreos Generales S.A.C. | Extracción Selectiva ({len(st.session_state['placas_filtradas_activas'])} Placas Seleccionadas)</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='sub-header'>Transportes Díaz Acarreos Generales S.A.C. | Flota Operativa Activa (Resumen A2:A35)</div>", unsafe_allow_html=True)
 
 
 # Función para cargar los datos en sesión
-def ejecutar_flujo_etl(ruta_m, dir_p, rango_r):
+def ejecutar_flujo_etl(ruta_m, dir_p, rango_r, placas_sel=None):
     """Ejecuta el flujo ETL con retroalimentación visual paso a paso y control de errores."""
     contenedor_flujo = st.container()
     
@@ -185,22 +246,24 @@ def ejecutar_flujo_etl(ruta_m, dir_p, rango_r):
                 return None
             
             # Paso 2: Extracción del Maestro
-            status_box.info(f"📑 Paso 2/6: Leyendo pestaña 'Resumen' ({rango_r}) y extrayendo datos operativos...")
+            cant_desc = f"{len(placas_sel)} unidades seleccionadas" if placas_sel else f"todas las unidades activas ({rango_r})"
+            status_box.info(f"📑 Paso 2/6: Leyendo pestaña 'Resumen' y extrayendo {cant_desc}...")
             progreso.progress(35)
-            datos = extraer_datos_maestro(ruta_m, rango_resumen=rango_r)
+            datos = extraer_datos_maestro(ruta_m, rango_resumen=rango_r, placas_seleccionadas=placas_sel)
 
             # Paso 3: Vehículos y Conductores
-            status_box.info("🚛 Paso 3/6: Generando plantillas de Vehículos y Conductores...")
+            status_box.info("🚛 Paso 3/6: Generando plantillas de Vehículos y Conductores (validando DNI con eldni.com)...")
             progreso.progress(55)
             generar_plantilla_vehiculos(dir_p, datos['tractos'], datos['cisternas'])
             generar_plantilla_conductores(dir_p, datos['conductores'])
             generar_plantilla_asignacion_conductores(dir_p, datos['asignaciones_conductores'], datos['tractos'], datos['conductores'])
 
-            # Paso 4: Neumáticos y Movimientos
-            status_box.info("🛞 Paso 4/7: Generando plantillas de Neumáticos e inventario de montajes...")
+            # Paso 4: Neumáticos, Movimientos e Inspecciones
+            status_box.info("🛞 Paso 4/7: Generando plantillas de Neumáticos, montajes e inspecciones periódicas...")
             progreso.progress(70)
             generar_plantilla_neumaticos(dir_p, datos['neumaticos'])
             generar_plantilla_movimientos(dir_p, datos['movimientos'])
+            generar_plantilla_inspecciones(dir_p, datos.get('inspecciones', []))
 
             # Paso 5: Combustible y Grifos
             status_box.info("⛽ Paso 5/7: Generando tabla comparativa de combustible y grifos...")
@@ -222,7 +285,7 @@ def ejecutar_flujo_etl(ruta_m, dir_p, rango_r):
 
             # Paso 7: Finalización
             progreso.progress(100)
-            status_box.success("✅ ¡Pipeline ejecutado exitosamente! Las 7 plantillas oficiales y el Reporte de Auditoría han sido generados y actualizados.")
+            status_box.success("✅ ¡Pipeline ejecutado exitosamente! Las 8 plantillas oficiales y el Reporte de Auditoría han sido generados y actualizados.")
             cargar_datos_maestro_cached.clear()
             time.sleep(0.3)
             return datos
@@ -234,11 +297,15 @@ def ejecutar_flujo_etl(ruta_m, dir_p, rango_r):
 
 # Si el usuario presiona el botón o ya tenemos datos en memoria
 if btn_ejecutar:
-    with st.spinner("Procesando datos del maestro..."):
-        datos_cargados = ejecutar_flujo_etl(ruta_maestro, dir_plantillas, rango_filas)
-        if datos_cargados:
-            st.session_state['datos_etl'] = datos_cargados
-            st.session_state['ultima_ejecucion'] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+    if modo_seleccion_placas == "Seleccionar placas específicas" and (not placas_a_procesar or len(placas_a_procesar) == 0):
+        st.error("❌ Por favor seleccione al menos una placa para ejecutar la extracción.")
+    else:
+        with st.spinner("Procesando datos del maestro..."):
+            datos_cargados = ejecutar_flujo_etl(ruta_maestro, dir_plantillas, rango_filas, placas_a_procesar)
+            if datos_cargados:
+                st.session_state['datos_etl'] = datos_cargados
+                st.session_state['ultima_ejecucion'] = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+                st.session_state['placas_filtradas_activas'] = placas_a_procesar
 
 # Cargar automáticamente los datos existentes si no se ha ejecutado el botón
 if 'datos_etl' not in st.session_state:
@@ -252,6 +319,10 @@ if 'datos_etl' not in st.session_state:
 if 'datos_etl' in st.session_state and st.session_state['datos_etl']:
     datos = st.session_state['datos_etl']
 
+    if 'placas_filtradas_activas' in st.session_state and st.session_state['placas_filtradas_activas']:
+        placas_lista_txt = ", ".join(sorted(st.session_state['placas_filtradas_activas']))
+        st.info(f"🎯 **Extracción Selectiva Activa ({len(st.session_state['placas_filtradas_activas'])} Unidades):** Datos extraídos exclusivamente para las placas: `{placas_lista_txt}`. Para extraer la flota completa, selecciona 'Todas las unidades activas' en la barra lateral y presiona '🚀 Ejecutar Pipeline ETL'.")
+
     tractos_df = pd.DataFrame(list(datos['tractos'].values()))
     cisternas_df = pd.DataFrame(list(datos['cisternas'].values()))
     vehiculos_df = pd.concat([tractos_df, cisternas_df], ignore_index=True)
@@ -260,31 +331,43 @@ if 'datos_etl' in st.session_state and st.session_state['datos_etl']:
     asignaciones_df = pd.DataFrame(list(datos['asignaciones_conductores'].values()))
     neumaticos_df = pd.DataFrame(list(datos['neumaticos'].values()))
     movimientos_df = pd.DataFrame(datos['movimientos'])
+    inspecciones_df = pd.DataFrame(datos.get('inspecciones', []))
 
-    # Asegurar tipos homogéneos en códigos de neumáticos para evitar advertencias de serialización
-    if not neumaticos_df.empty:
-        neumaticos_df['codigo'] = neumaticos_df['codigo'].astype(str)
-    if not movimientos_df.empty:
-        movimientos_df['codigo'] = movimientos_df['codigo'].astype(str)
+    # Asegurar tipos homogéneos y formatos numéricos (7 dígitos para neumáticos, 8 dígitos para DNI)
+    if not neumaticos_df.empty and 'codigo' in neumaticos_df.columns:
+        neumaticos_df['codigo'] = neumaticos_df['codigo'].apply(lambda x: str(x).zfill(7) if str(x).isdigit() else str(x))
+    if not movimientos_df.empty and 'codigo' in movimientos_df.columns:
+        movimientos_df['codigo'] = movimientos_df['codigo'].apply(lambda x: str(x).zfill(7) if str(x).isdigit() else str(x))
+    if not conductores_df.empty and 'dni' in conductores_df.columns:
+        conductores_df['dni'] = conductores_df['dni'].apply(lambda x: str(x).zfill(8) if str(x).isdigit() else str(x))
+    if not asignaciones_df.empty and 'dni' in asignaciones_df.columns:
+        asignaciones_df['dni'] = asignaciones_df['dni'].apply(lambda x: str(x).zfill(8) if str(x).isdigit() else str(x))
+    if not inspecciones_df.empty:
+        if 'codigo' in inspecciones_df.columns:
+            inspecciones_df['codigo'] = inspecciones_df['codigo'].apply(lambda x: str(x).zfill(7) if str(x).isdigit() else str(x))
+        if 'prom_mm' not in inspecciones_df.columns and 'prof_int' in inspecciones_df.columns:
+            inspecciones_df['prom_mm'] = (inspecciones_df['prof_int'] + inspecciones_df['prof_cent'] + inspecciones_df['prof_ext']) / 3.0
 
     # Métricas Principales (KPIs)
     st.markdown("### 📊 Métricas de la Flota Operativa")
-    kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
+    kpi1, kpi2, kpi3, kpi4, kpi5, kpi6, kpi7 = st.columns(7)
     kpi1.metric("🚛 Tractocamiones", len(tractos_df), delta="Activos")
     kpi2.metric("🚚 Semirremolques", len(cisternas_df), delta="Cisternas")
     kpi3.metric("👨‍✈️ Conductores", len(conductores_df), delta="Validados")
     kpi4.metric("🛞 Neumáticos", len(neumaticos_df), delta="Únicos")
     kpi5.metric("🔄 Movimientos", len(movimientos_df), delta="Montajes")
-    kpi6.metric("⛽ Combustible", len(tractos_df) * 3, delta="Registros")
+    kpi6.metric("🔍 Inspecciones", len(inspecciones_df), delta="Mediciones")
+    kpi7.metric("⛽ Combustible", len(tractos_df) * 3, delta="Registros")
 
     st.divider()
 
     # Pestañas Interactivas
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🚛 Flota y Vehículos",
         "👨‍✈️ Conductores",
         "🛞 Neumáticos",
         "🔄 Esquema de Montaje",
+        "🔍 Inspecciones Técnicas",
         "⛽ Combustible y Grifos",
         "📁 Descarga de Plantillas"
     ])
@@ -359,21 +442,18 @@ if 'datos_etl' in st.session_state and st.session_state['datos_etl']:
         n_neu_tot = len(neumaticos_df)
         n_mov_tot = len(movimientos_df)
         n_dup_tot = n_mov_tot - n_neu_tot
+        n_tractos_tot = len(tractos_df)
+        n_teoricos_tot = n_tractos_tot * 24
+        n_falt_tot = max(0, n_teoricos_tot - n_mov_tot)
+
         st.subheader(f"Catálogo Maestro de Neumáticos ({n_neu_tot} Activos Únicos - Opción B)")
-        with st.expander(f"📋 Ver Conciliación Matemática y Auditoría (816 Teóricos vs {n_mov_tot} Montajes vs {n_neu_tot} Únicos)", expanded=False):
+        with st.expander(f"📋 Ver Conciliación Matemática y Auditoría ({n_teoricos_tot} Teóricos vs {n_mov_tot} Montajes vs {n_neu_tot} Únicos)", expanded=False):
             st.markdown(f"""
-            **Conciliación Matemática de la Flota Activa:**
-            * **Capacidad Teórica (34 unidades x 24 posiciones):** **816 cupos** (11 en tracto + 13 en cisterna).
+            **Conciliación Matemática de las Unidades Procesadas ({n_tractos_tot} Unidades):**
+            * **Capacidad Teórica ({n_tractos_tot} unidades x 24 posiciones):** **{n_teoricos_tot} cupos** (11 en tracto + 13 en cisterna).
             * **Montajes Físicos Extraídos:** **{n_mov_tot} posiciones** reales instaladas.
-            * **Posiciones Faltantes / Sin Código (12 faltantes en 7 unidades):**
-              * `ACF-943`: Faltan 2 (Tracto RT y Cisterna RS vacíos).
-              * `AKO-813`: Falta 1 (Tracto RT anotado como 'Sin código').
-              * `AMY-787`: Falta 1 (Tracto RT vacío).
-              * `AUW-702`: Falta 1 (Cisterna RS anotada como 'SIN CÓDIGO').
-              * `T5Q-937`: Falta 1 (Cisterna RS vacía).
-              * `T5R-834`: Falta 1 (Cisterna RS vacía).
-              * `T8U-906`: Faltan 5 (Tracto P3, P7, P8 y RT con 'Sin codigo'; Cisterna RS vacía).
-            * **Neumáticos Únicos ({n_neu_tot} activos - Opción B):** En `k.xlsx` existen **{n_dup_tot} códigos seriales repetidos** ({n_dup_tot * 2} montajes). En la base de datos relacional de DAG Neumáticos, el catálogo maestro consolida los {n_neu_tot} códigos únicos para preservar la llave primaria (*Primary Key*), mientras que la plantilla de movimientos mantiene los {n_mov_tot} montajes físicos.
+            * **Posiciones Faltantes / Sin Código:** **{n_falt_tot} posiciones**.
+            * **Neumáticos Únicos ({n_neu_tot} activos - Opción B):** Existen **{n_dup_tot} ocurrencias de códigos repetidos** ({n_dup_tot * 2} montajes). En la base de datos relacional de DAG Neumáticos, el catálogo maestro consolida los {n_neu_tot} códigos únicos para preservar la llave primaria (*Primary Key*), mientras que la plantilla de movimientos mantiene los {n_mov_tot} montajes físicos.
             """)
         n_col1, n_col2, n_col3 = st.columns(3)
         with n_col1:
@@ -478,8 +558,94 @@ if 'datos_etl' in st.session_state and st.session_state['datos_etl']:
             else:
                 st.info("Esta unidad no tiene cisterna asignada en la pestaña 'Resumen'.")
 
-    # --- TAB 5: COMBUSTIBLE Y GRIFOS ---
+    # --- TAB 5: INSPECCIONES TÉCNICAS ---
     with tab5:
+        n_ins_total = len(inspecciones_df)
+        st.subheader(f"Inspecciones Técnicas de Neumáticos ({n_ins_total} Mediciones Extraídas)")
+        st.markdown("Auditoría de profundidades de banda de rodadura (mm), odómetro en inspección y diagnóstico de desgaste.")
+
+        if not inspecciones_df.empty:
+            i_kpi1, i_kpi2, i_kpi3, i_kpi4 = st.columns(4)
+            prof_prom = inspecciones_df['prom_mm'].mean()
+            criticos = len(inspecciones_df[inspecciones_df['prom_mm'] <= 3.0])
+            irregulares = len(inspecciones_df[inspecciones_df['observacion'].str.contains('irregular', case=False, na=False)])
+            normales = n_ins_total - criticos - irregulares
+
+            i_kpi1.metric("Profundidad Promedio", f"{prof_prom:.1f} mm")
+            i_kpi2.metric("Cocada Crítica (≤ 3 mm)", criticos, delta="Alerta Reencauche", delta_color="inverse")
+            i_kpi3.metric("Desgaste Irregular", irregulares, delta="Alineación / Ejes", delta_color="inverse")
+            i_kpi4.metric("Desgaste Normal", normales, delta="Condición Aceptable")
+
+            st.divider()
+
+            # Filtros interactivos
+            c_if1, c_if2, c_if3 = st.columns([3, 2, 3])
+            with c_if1:
+                todas_placas = sorted(inspecciones_df['placa'].unique())
+                filtro_i_placa = st.multiselect("Filtrar por Vehículo:", options=todas_placas, default=todas_placas[:6])
+            with c_if2:
+                todas_pos = sorted(inspecciones_df['posicion'].unique())
+                filtro_i_pos = st.multiselect("Filtrar por Posición:", options=todas_pos, default=todas_pos)
+            with c_if3:
+                filtro_i_estado = st.selectbox("Condición / Diagnóstico:", options=["Todos los registros", "Solo Críticos (≤ 3 mm)", "Solo Desgaste Irregular", "Solo Normales"])
+
+            df_ins_filtrado = inspecciones_df[
+                (inspecciones_df['placa'].isin(filtro_i_placa)) &
+                (inspecciones_df['posicion'].isin(filtro_i_pos))
+            ]
+
+            if filtro_i_estado == "Solo Críticos (≤ 3 mm)":
+                df_ins_filtrado = df_ins_filtrado[df_ins_filtrado['prom_mm'] <= 3.0]
+            elif filtro_i_estado == "Solo Desgaste Irregular":
+                df_ins_filtrado = df_ins_filtrado[df_ins_filtrado['observacion'].str.contains('irregular', case=False, na=False)]
+            elif filtro_i_estado == "Solo Normales":
+                df_ins_filtrado = df_ins_filtrado[(df_ins_filtrado['prom_mm'] > 3.0) & (~df_ins_filtrado['observacion'].str.contains('irregular', case=False, na=False))]
+
+            st.dataframe(
+                df_ins_filtrado[['placa', 'codigo', 'posicion', 'km', 'prof_int', 'prof_cent', 'prof_ext', 'prom_mm', 'observacion']],
+                column_config={
+                    "placa": "Vehículo",
+                    "codigo": "Código Neumático",
+                    "posicion": "Posición",
+                    "km": st.column_config.NumberColumn("Kilometraje", format="%.0f km"),
+                    "prof_int": st.column_config.NumberColumn("Prof. Int", format="%.1f mm"),
+                    "prof_cent": st.column_config.NumberColumn("Prof. Cent", format="%.1f mm"),
+                    "prof_ext": st.column_config.NumberColumn("Prof. Ext", format="%.1f mm"),
+                    "prom_mm": st.column_config.NumberColumn("Promedio Cocada", format="%.1f mm"),
+                    "observacion": "Diagnóstico / Observación"
+                }
+            )
+
+            # Gráficos de Distribución de Cocada
+            col_ig1, col_ig2 = st.columns(2)
+            with col_ig1:
+                fig_hist_prof = px.histogram(
+                    inspecciones_df,
+                    x='prom_mm',
+                    nbins=20,
+                    title='Distribución de Profundidad de Cocada Promedio (mm)',
+                    labels={'prom_mm': 'Profundidad (mm)'},
+                    color_discrete_sequence=['#2563EB']
+                )
+                fig_hist_prof.add_vline(x=3.0, line_dash="dash", line_color="red", annotation_text="Límite Crítico (3 mm)")
+                st.plotly_chart(fig_hist_prof)
+
+            with col_ig2:
+                fig_scatter = px.scatter(
+                    inspecciones_df,
+                    x='prof_int',
+                    y='prof_ext',
+                    color='observacion',
+                    title='Desgaste: Profundidad Interior vs Exterior (mm)',
+                    labels={'prof_int': 'Prof. Interior (mm)', 'prof_ext': 'Prof. Exterior (mm)'},
+                    hover_data=['placa', 'codigo', 'posicion']
+                )
+                st.plotly_chart(fig_scatter)
+        else:
+            st.info("Sin registros de inspecciones disponibles. Ejecute el Pipeline ETL para extraer las mediciones.")
+
+    # --- TAB 6: COMBUSTIBLE Y GRIFOS ---
+    with tab6:
         st.subheader("Tabla Comparativa de Combustible y Grifos")
         c_comb1, c_comb2 = st.columns([3, 2])
 
@@ -505,20 +671,38 @@ if 'datos_etl' in st.session_state and st.session_state['datos_etl']:
             ], columns=['NOMBRE_GRIFO', 'PROVEEDOR', 'CIUDAD', 'DIRECCION', 'ESTADO'])
             st.dataframe(grifos_df)
 
-    # --- TAB 6: DESCARGA DE ARCHIVOS ---
-    with tab6:
+    # --- TAB 7: DESCARGA DE ARCHIVOS ---
+    with tab7:
         st.subheader("📁 Descarga Directa de Plantillas Oficiales")
-        st.markdown("Los siguientes archivos fueron generados y están listos para ser importados en la aplicación DAG Neumáticos:")
+        
+        cant_unidades_descarga = len(tractos_df)
+        if 'placas_filtradas_activas' in st.session_state and st.session_state['placas_filtradas_activas']:
+            st.info(f"🎯 **Plantillas generadas para extracción selectiva:** Los archivos contienen los datos de las **{cant_unidades_descarga} unidades seleccionadas**.")
+        else:
+            st.markdown("Los siguientes archivos fueron generados y están listos para ser importados en la aplicación DAG Neumáticos:")
+
+        n_veh_total = len(vehiculos_df)
+        n_tractos_total = len(tractos_df)
+        n_cisternas_total = len(cisternas_df)
+        n_cond_total = len(conductores_df)
+        n_asig_total = len(asignaciones_df)
+        n_neu_total = len(neumaticos_df)
+        n_mov_total = len(movimientos_df)
+        n_ins_total = len(inspecciones_df)
+        n_comp_total = n_tractos_total * 3
+
+        desc_reporte = f"Informe de 4 hojas: Justificación Opción B, Faltantes, Duplicados y Estado de las {n_tractos_total} Unidades procesadas"
 
         plantillas_info = [
-            ("Plantilla_Registro_Masivo_Vehiculos_DAG.xlsx", "Plantilla de Vehículos", "68 unidades (34 tractos + 34 cisternas)"),
-            ("Plantilla_Registro_Masivo_Conductores_DAG.xlsx", "Plantilla de Conductores", "30 conductores validados"),
-            ("Plantilla_Registro_Masivo_Asignacion_Conductores_DAG.xlsx", "Asignación de Conductores", "34 asignaciones activas"),
-            ("Plantilla_Registro_Masivo_Neumaticos_DAG.xlsx", "Plantilla de Neumáticos", "780 neumáticos únicos"),
-            ("Plantilla_Asignacion_Movimiento_Neumaticos_DAG.xlsx", "Asignación y Montajes", "804 montajes en posiciones P1..P22/RT/RS"),
-            ("Plantilla_Registro_Masivo_Comparativa_DAG.xlsx", "Tabla Comparativa Combustible", "102 registros"),
+            ("Plantilla_Registro_Masivo_Vehiculos_DAG.xlsx", "Plantilla de Vehículos", f"{n_veh_total} unidades ({n_tractos_total} tractos + {n_cisternas_total} cisternas)"),
+            ("Plantilla_Registro_Masivo_Conductores_DAG.xlsx", "Plantilla de Conductores", f"{n_cond_total} conductores validados"),
+            ("Plantilla_Registro_Masivo_Asignacion_Conductores_DAG.xlsx", "Asignación de Conductores", f"{n_asig_total} asignaciones activas"),
+            ("Plantilla_Registro_Masivo_Neumaticos_DAG.xlsx", "Plantilla de Neumáticos", f"{n_neu_total} neumáticos únicos"),
+            ("Plantilla_Asignacion_Movimiento_Neumaticos_DAG.xlsx", "Asignación y Montajes", f"{n_mov_total} montajes en posiciones P1..P22/RT/RS"),
+            ("Plantilla_Inspeccion_Neumaticos_DAG.xlsx", "Plantilla de Inspección de Neumáticos", f"{n_ins_total} mediciones de cocada y odómetro por posición"),
+            ("Plantilla_Registro_Masivo_Comparativa_DAG.xlsx", "Tabla Comparativa Combustible", f"{n_comp_total} registros"),
             ("Plantilla_Registro_Masivo_Grifos_DAG.xlsx", "Catálogo de Grifos", "5 estaciones de despacho"),
-            ("Reporte_Auditoria_Conciliacion_Neumaticos_DAG.xlsx", "📊 Reporte de Auditoría y Conciliación", "Informe de 4 hojas: Justificación Opción B, 12 Faltantes, 24 Duplicados y Estado de las 34 Unidades")
+            ("Reporte_Auditoria_Conciliacion_Neumaticos_DAG.xlsx", "📊 Reporte de Auditoría y Conciliación", desc_reporte)
         ]
 
         # Botón para descargar todas las plantillas en un archivo ZIP
